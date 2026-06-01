@@ -1,142 +1,290 @@
 # lau-sia2-engine
 
-> SIA² spectral engine: Banach fixed-point learning, conservation laws, Fisher information, and renormalization in Rust
+**High-performance Rust engine for SIA² (Self-Improving AI with Spectral Architecture).**
+
+A mathematically rigorous framework that guarantees AI self-improvement converges, using the Banach fixed-point theorem, spectral decomposition, information geometry, PDE dynamics, renormalization-group flow, and Noether conservation laws.
+
+---
 
 ## What This Does
 
-lau-sia2-engine is the Rust core of the SIA² (Spectral Improvement Architecture squared) framework. It provides ten interlocking modules that implement contraction-based learning (Banach fixed-point theorem), spectral conservation laws, feedback control loops, Fisher information geometry, orchestration of spectral operations, PDE solvers, renormalization group flow, spectral decompositions, and trajectory optimization — all with rigorous mathematical foundations.
+This crate implements the *computational core* of the SIA² loop — the theorem-backed machinery that takes an AI agent's performance metrics, decides *what* to improve and *how fast* it will converge, and verifies that no capability is lost along the way.
 
-## The Key Idea
+Given a snapshot of performance across N capability dimensions (reasoning, tool use, error handling, efficiency, robustness, generalization, creativity, consistency), the engine:
 
-Traditional learning uses gradient descent. SIA² uses **contraction mappings**: the learning update is provably a contraction in a Banach space, guaranteeing convergence to a unique fixed point. Combined with spectral conservation laws (total spectral energy is preserved across transformations) and renormalization (coarse-graining that preserves fixed points), you get a learning system with provable convergence, stability, and scale-invariance.
+1. **Decomposes** performance into spectral eigenmodes via eigendecomposition of the capability correlation matrix.
+2. **Identifies** the weakest eigenmode — the "frequency" of performance most in need of reinforcement.
+3. **Computes** a natural-gradient improvement direction scaled by the inverse Fisher information.
+4. **Tracks** convergence via the Banach contraction ratio, predicting *when* the agent will reach a fixed point.
+5. **Verifies** four conservation laws (capability conservation, Landauer bound, continuity, monotonicity) so improvement never destroys existing capability.
+6. **Models** multi-step dynamics as a reaction–diffusion PDE on the performance manifold.
+7. **Classifies** the improvement trajectory into a renormalization-group universality class (Gaussian, Wilson–Fisher, asymptotic freedom, or relevant operator).
+
+Everything is pure Rust, zero unsafe, serializable with `serde`.
+
+---
+
+## Key Idea
+
+> **Self-improvement is a contraction mapping on a Banach space.**
+
+If the improvement operator T satisfies ‖T(x) − T(y)‖ ≤ q‖x − y‖ for some q < 1, then Banach's fixed-point theorem guarantees the agent converges to a unique optimal state. The engine monitors q in real time and raises an alarm when the operator ceases to be a contraction.
+
+---
 
 ## Install
 
 ```toml
+# Cargo.toml
 [dependencies]
-lau-sia2-engine = { git = "https://github.com/SuperInstance/lau-sia2-engine" }
+lau-sia2-engine = "0.1"
 ```
+
+Requires Rust 2021 edition (MSRV 1.56+).
+
+### Dependencies
+
+| crate | purpose |
+|---|---|
+| `nalgebra` | linear algebra (eigen-decomposition, matrix ops) |
+| `num-complex` | complex number support |
+| `serde` / `serde_json` | serialization of trajectories, steps, summaries |
+| `chrono` | timestamping |
+
+Dev dependency: `approx` for floating-point assertions.
+
+---
 
 ## Quick Start
 
 ```rust
-use lau_sia2_engine::banach::ContractionMap;
-use lau_sia2_engine::spectral::SpectralDecomposer;
-use lau_sia2_engine::fisher::FisherInformation;
-use lau_sia2_engine::orchestrator::Orchestrator;
-use nalgebra::DVector;
+use lau_sia2_engine::SIA2Orchestrator;
+use std::collections::HashMap;
 
-// Create a contraction mapping for learning
-let contraction = ContractionMap::new(0.5); // Lipschitz constant < 1
-let initial = DVector::from_vec(vec![1.0, 2.0, 3.0]);
-let fixed_point = contraction.iterate_to_fixed_point(&initial, 1e-10);
-println!("Fixed point: {:?}", fixed_point);
+fn main() {
+    let mut orch = SIA2Orchestrator::new(8);
 
-// Spectral decomposition
-let decomposer = SpectralDecomposer::new();
-let matrix = /* your matrix */;
-let (eigenvalues, eigenvectors) = decomposer.decompose(&matrix);
+    // Initial performance across 8 capability dimensions
+    let initial: HashMap<String, f64> = [
+        ("reasoning", 0.5), ("tool_use", 0.5), ("error_handling", 0.5),
+        ("efficiency", 0.5), ("robustness", 0.5), ("generalization", 0.5),
+        ("creativity", 0.5), ("consistency", 0.5),
+    ].iter().map(|(k, v)| (k.to_string(), *v)).collect();
 
-// Fisher information matrix from parameter samples
-let fisher = FisherInformation::from_samples(&samples);
-let natural_gradient = fisher.natural_gradient(&euclidean_gradient);
+    orch.initialize(&initial, "my_task");
+
+    // Simulate improvement over generations
+    for gen in 1..=10 {
+        let improved: HashMap<String, f64> = initial.keys()
+            .map(|k| (k.clone(), 0.5 + gen as f64 * 0.05))
+            .collect();
+        let step = orch.analyze_and_plan(&improved);
+        println!(
+            "gen={} mode={} q={:.4} conserved={} gap={:.4}",
+            step.generation, step.target_mode,
+            step.banach_contraction, step.conservation_holds,
+            step.spectral_gap,
+        );
+    }
+
+    println!("Converged? {}", orch.is_converged());
+}
 ```
+
+---
 
 ## API Reference
 
-### `banach` — Contraction Mappings
+### `SIA2Orchestrator` — the top-level loop
 
-| Type | Description |
-|------|-------------|
-| `ContractionMap::new(lipschitz)` | Create with Lipschitz constant < 1. |
-| `iterate_to_fixed_point(x0, tol)` | Iterate until ‖f(x) - x‖ < tol. Guaranteed convergence. |
-| `lipschitz_constant()` | Returns the contraction rate. |
+| method | description |
+|---|---|
+| `new(n_capabilities)` | create orchestrator for N dimensions |
+| `initialize(&metrics, task_name)` | set baseline, reset trackers |
+| `analyze_and_plan(&metrics) → ImprovementStep` | run one full cycle (spectral → conservation → Banach → Fisher → RG → PDE) |
+| `is_converged() → bool` | has the contraction ratio dropped below 0.5? |
+| `contraction_ratio() → f64` | latest Banach q value |
 
-### `conservation` — Spectral Conservation Laws
+Fields are public: `.spectral`, `.conservation`, `.banach`, `.info_geom`, `.pde`, `.rg`, `.trajectory`.
 
-| Type | Description |
-|------|-------------|
-| `ConservationLaw` | Verifies total spectral energy is preserved. |
-| `verify_conservation(before, after)` | Check that Σλᵢ is unchanged. |
+### `SpectralAnalyzer` — eigenmode decomposition
 
-### `feedback` — Feedback Control
+| method | description |
+|---|---|
+| `new(n)` | N-dimension analyzer (default 8) |
+| `analyze(&log, &metrics) → Vec<SpectralMode>` | full eigendecomposition, sorted descending by eigenvalue magnitude |
+| `find_weakest_mode(&modes) → &SpectralMode` | smallest-eigenvalue mode |
+| `compute_improvement_direction(&mode) → Vec<f64>` | natural-gradient direction (eigenvector / eigenvalue) |
+| `build_correlation_matrix(&log) → DMatrix` | tridiagonal-adjacent capability correlation |
 
-| Type | Description |
-|------|-------------|
-| `FeedbackController` | PD controller for spectral trajectory stabilization. |
-| `compute_correction(current, target)` | Returns correction vector. |
+`SpectralMode` fields: `eigenvalue`, `eigenvector`, `mode_name`, `frequency`, `decay_rate`.
 
-### `fisher` — Fisher Information
+### `BanachConvergence` — contraction tracking
 
-| Type | Description |
-|------|-------------|
-| `FisherInformation::from_samples(samples)` | Estimate Fisher information matrix. |
-| `natural_gradient(euclidean_grad)` | Transform to natural gradient via F⁻¹∇. |
+| method | description |
+|---|---|
+| `new()` / `with_metric_names(names)` | create tracker |
+| `compute_contraction_ratio(&metrics) → f64` | q = ‖Δ_n‖ / ‖Δ_{n-1}‖ |
+| `predict_convergence_generation() → Option<usize>` | O(log ε / log q) estimate |
+| `is_contraction() → bool` | q < 1? |
+| `is_fixed_point() → bool` | ‖Δ_n‖ < 1e-6? |
+| `status() → ConvergenceStatus` | serializable summary |
 
-### `orchestrator` — Spectral Orchestration
+### `ConservationChecker` — Noether law verification
 
-| Type | Description |
-|------|-------------|
-| `Orchestrator` | Coordinates spectral operations across modules. |
-| `run_step(state)` | One orchestration step: spectral → feedback → update. |
+Returns a `Vec<ConservationLaw>` with four entries per cycle:
 
-### `pde` — PDE Solvers
+| law | invariant |
+|---|---|
+| `capability_conservation` | total score ≥ initial (±5%) |
+| `landauer_bound` | improvement cost bounded |
+| `continuity` | no metric jumps > 0.8 |
+| `monotonicity` | no metric decreases > 0.05 |
 
-| Type | Description |
-|------|-------------|
-| `HeatSolver` | Implicit heat equation solver (spectral diffusion). |
-| `WaveSolver` | Wave equation via spectral decomposition. |
+### `InformationGeometry` — Fisher information
 
-### `renormalization` — Renormalization Group
+| method | description |
+|---|---|
+| `compute_fisher_information(&perfs) → DMatrix` | F = (1/n) Σ ∇p ∇pᵀ + λI |
+| `natural_gradient(&grad) → Vec<f64>` | F⁻¹ ∇L |
+| `fisher_rao_distance(&a, &b) → f64` | Mahalanobis distance under F |
+| `fisher_summary() → FisherSummary` | trace, det, condition number, effective dimensionality |
 
-| Type | Description |
-|------|-------------|
-| `RGFlow` | Coarse-graining that preserves fixed points. |
-| `renormalize(matrix, scale)` | Apply one RG step. |
+### `PDEImprovementDynamics` — reaction-diffusion model
 
-### `spectral` — Spectral Methods
+| method | description |
+|---|---|
+| `predict_next_state(&state, reaction_rate) → HashMap` | explicit Euler: u += dt(D Δu + R(u)) |
+| `predict_n_steps(&initial, rate, n) → HashMap` | multi-step rollout |
+| `energy_estimate(&state) → f64` | L² energy |
+| `maximum_principle_check(&before, &after, tol) → bool` | parabolic min-principle |
+| `state_summary(&state) → PDEStateSummary` | energy, min, max, mean, variance |
 
-| Type | Description |
-|------|-------------|
-| `SpectralDecomposer` | Eigenvalue/eigenvector computation. |
-| `decompose(matrix)` | Full eigendecomposition. |
+### `RenormalizationTracker` — RG flow
 
-### `trajectory` — Trajectory Optimization
+| method | description |
+|---|---|
+| `add_scale(&metrics)` | record a coarse-grained level |
+| `compute_beta_function() → HashMap` | β(g) = dg/d(ln μ) |
+| `find_fixed_point() → Option` | β ≈ 0? |
+| `classify_universality() → UniversalityClass` | Gaussian / WilsonFisher / AsymptoticFreedom / RelevantOperator |
+| `correlation_length() → f64` | ξ = 1/|β| |
+| `is_approaching_fixed_point() → bool` | late β < early β? |
 
-| Type | Description |
-|------|-------------|
-| `TrajectoryOptimizer` | Geodesic path planning on manifolds. |
-| `optimize(start, end, steps)` | Compute optimal spectral trajectory. |
+### `ImprovementTrajectory` — step history
+
+Serializable via `serde`. Methods: `add_step`, `is_converged`, `total_information_gain`, `predict_next` (linear extrapolation weighted by contraction ratio).
+
+---
 
 ## How It Works
 
-The engine operates in cycles:
-1. **Spectral Decomposition**: Extract eigenstructure of the current state.
-2. **Conservation Check**: Verify spectral energy is conserved.
-3. **Fisher Update**: Compute natural gradient using Fisher information.
-4. **Contraction Step**: Apply contraction mapping (guaranteed convergence).
-5. **Feedback Correction**: PD controller stabilizes the trajectory.
-6. **Renormalization**: Coarse-grain if spectral scale changes significantly.
+### The Improvement Loop (per generation)
 
-Each cycle is a Banach contraction, so the entire process converges provably.
+```
+┌──────────────────────────────────────────────────┐
+│  metrics in                                      │
+│  ├── SpectralAnalyzer: eigen-decompose           │
+│  │   └── find weakest mode                       │
+│  ├── ConservationChecker: verify 4 laws          │
+│  ├── BanachConvergence: compute q                │
+│  ├── InformationGeometry: Fisher distance        │
+│  ├── PDEImprovementDynamics: predict next state  │
+│  └── RenormalizationTracker: classify flow       │
+│  → ImprovementStep (serialized to trajectory)    │
+└──────────────────────────────────────────────────┘
+```
+
+1. **Spectral analysis** builds a correlation matrix over capabilities, performs Jacobi eigen-decomposition, and ranks modes by eigenvalue magnitude.
+2. **Conservation checking** compares current metrics against the baseline to ensure no law is violated.
+3. **Banach tracking** computes the ratio of successive improvements; if q < 1, convergence is guaranteed.
+4. **Fisher information** accumulates gradient outer products from the performance history to form a Riemannian metric tensor.
+5. **PDE dynamics** models the next-generation state as a diffusion + reaction step.
+6. **Renormalization** classifies the trajectory's long-range behavior into a universality class.
+
+### Jacobi Eigenvalue Algorithm
+
+The engine uses the classical Jacobi rotation method for symmetric eigendecomposition — numerically stable, no unsafe code, and guaranteed to converge for real symmetric matrices. Off-diagonal elements are annihilated one at a time via Givens rotations until the matrix is diagonal (tolerance 1e-12).
+
+---
 
 ## The Math
 
-- **Banach Fixed-Point Theorem**: If f: X→X has Lipschitz constant L < 1, then f has a unique fixed point x* and xₙ → x* for any starting x₀.
-- **Fisher Information**: I(θ) = E[(∂ log p(x|θ)/∂θ)(∂ log p(x|θ)/∂θ)ᵀ]. Natural gradient: ∇̃ = I⁻¹∇.
-- **Conservation Law**: Σλᵢ is invariant under unitary transformations.
+### Banach Fixed-Point Theorem
 
-## Testing
+For a complete metric space (X, d) and contraction T: X → X with d(Tx, Ty) ≤ q·d(x, y), q ∈ [0, 1):
 
-90 tests covering:
-- Contraction mapping convergence proofs
-- Conservation law verification
-- Feedback controller stability
-- Fisher information estimation accuracy
-- Orchestrator full-cycle runs
-- PDE solver convergence
-- Renormalization fixed-point preservation
-- Spectral decomposition correctness
+- T has a **unique** fixed point x*.
+- For any x₀, the sequence xₙ₊₁ = T(xₙ) converges: d(xₙ, x*) ≤ qⁿ/(1−q) · d(x₀, x₁).
+
+The engine tracks q in real time and predicts convergence generation via ⌈log(ε)/log(q)⌉.
+
+### Spectral Decomposition
+
+The capability correlation matrix C ∈ ℝ^{N×N} is decomposed: C = V Λ Vᵀ. Eigenvalues λ_i measure how much each orthogonal mode contributes to total performance variance. The **spectral gap** λ₁ − λ₂ indicates how dominant the leading mode is.
+
+### Information Geometry
+
+Performance lives on a statistical manifold with Fisher metric F_ij = E[∂ᵢ log p · ∂ⱼ log p]. The Fisher-Rao distance between states a, b is:
+
+d_FR(a, b) = √((a−b)ᵀ F⁻¹ (a−b))
+
+The natural gradient F⁻¹∇L corrects the steepest-descent direction for the curvature of the parameter space.
+
+### PDE Dynamics
+
+Improvement follows the reaction–diffusion equation:
+
+∂u/∂t = D Δu + R(u)
+
+where D is the diffusion coefficient (cross-capability spreading), Δu is the discrete Laplacian, and R(u) = r · max(mean − u, 0) drives below-average capabilities upward.
+
+**Energy estimate:** ‖u(t)‖₂ ≤ ‖u(0)‖₂ · e^{−2Dt}.  
+**Maximum principle:** min u(x, t) ≥ min u(x, 0) (performance floor never drops).
+
+### Renormalization Group
+
+As generations act as coarse-graining steps, the RG beta function β(g) = dg/d(ln μ) characterizes flow:
+
+| class | β behavior | meaning |
+|---|---|---|
+| Gaussian | β ≈ 0 | at fixed point (trivial flow) |
+| Wilson–Fisher | β has non-trivial zero | near phase transition |
+| Asymptotic Freedom | β → 0 as g → ∞ | self-improving improvement rate |
+| Relevant Operator | β large | strong, unclassifed flow |
+
+### Conservation Laws (Noether)
+
+By analogy with Noether's theorem (symmetries → conserved quantities):
+
+| symmetry | conserved quantity |
+|---|---|
+| translational invariance in capability space | total capability score |
+| information erasure symmetry | Landauer bound on improvement cost |
+| temporal smoothness | continuity (no jumps) |
+| monotonic improvement | individual metric non-decrease |
+
+---
+
+## Test Suite
+
+**90 tests** across all 9 source files:
+
+| module | tests |
+|---|---|
+| `spectral` | 12 |
+| `conservation` | 11 |
+| `banach` | 10 |
+| `fisher` | 11 |
+| `pde` | 11 |
+| `renormalization` | 11 |
+| `feedback` | 8 |
+| `trajectory` | 9 |
+| `orchestrator` | 7 |
+
+Run: `cargo test`
+
+---
 
 ## License
 
